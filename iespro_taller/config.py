@@ -1,36 +1,74 @@
+import mysql.connector
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = BASE_DIR.parent
+def inicializar_base_de_datos():
+    # Variables de entorno con fallbacks seguros basados en config.py
+    host = os.getenv("MYSQL_HOST", "localhost")
+    port = int(os.getenv("MYSQL_PORT", "3306"))
+    user = os.getenv("MYSQL_USER", "root")
+    password = os.getenv("MYSQL_PASSWORD", "P@blomontero21")
+    database = os.getenv("MYSQL_DATABASE", "iespro_taller_app")
 
-# MySQL
-MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
-MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_USER = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "root2919")
-MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "iespro_taller_app")
+    try:
+        # 1. Conexión al servidor MySQL
+        conexion = mysql.connector.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password
+        )
+        cursor = conexion.cursor()
 
-# Ollama
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_CHAT_MODEL = os.getenv("OLLAMA_CHAT_MODEL", "llama3.2:3b")
-OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+        # Asegurar la existencia de la base de datos
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database};")
+        cursor.execute(f"USE {database};")
 
-# Ventana de contexto del chat (llama3.2:3b soporta 128k; reservamos poco en local por VRAM/latencia)
-OLLAMA_CONTEXT_MAX_TOKENS = int(os.getenv("OLLAMA_CONTEXT_MAX_TOKENS", "2048"))
-OLLAMA_CONTEXT_MESSAGE_CAP = int(os.getenv("OLLAMA_CONTEXT_MESSAGE_CAP", "40"))
-OLLAMA_CONTEXT_RESERVED_TOKENS = int(os.getenv("OLLAMA_CONTEXT_RESERVED_TOKENS", "768"))
+        # Desactivar la verificación de FK para evitar errores de orden (Error 1824)
+        cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+        print("Verificación de llaves foráneas desactivada temporalmente.")
 
-# ChromaDB — misma carpeta que el proyecto RAG original (./db_vectorial)
-CHROMA_PATH = os.getenv("CHROMA_PATH", str(PROJECT_ROOT / "db_vectorial"))
-CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "iespro_taller_fallas")
+        # Definir la ruta correcta de la carpeta sql en la raíz de iespro_taller
+        base_dir = Path(__file__).resolve().parent
+        ruta_sql = base_dir / "sql" / "init.sql"
+        
+        # Si este script corre dentro de la carpeta 'services', sube un nivel
+        if base_dir.name == "services":
+            ruta_sql = base_dir.parent / "sql" / "init.sql"
 
-DOCUMENTS_PATH = BASE_DIR / "data" / "documentos"
-DEFAULT_SUCURSAL_ID = int(os.getenv("DEFAULT_SUCURSAL_ID", "1"))
+        if ruta_sql.exists():
+            print(f"Leyendo archivo de inicialización desde: {ruta_sql}")
+            with open(ruta_sql, 'r', encoding='utf-8') as f:
+                # Filtrar líneas vacías y comentarios simples para no romper la ejecución
+                contenido_sql = f.read()
+                sentencias = contenido_sql.split(';')
+                
+                for sentencia in sentencias:
+                    sentencia_limpia = sentencia.strip()
+                    if sentencia_limpia and not sentencia_limpia.startswith('--'):
+                        try:
+                            cursor.execute(sentencia_limpia)
+                        except mysql.connector.Error as sql_err:
+                            # Muestra exactamente qué tabla o consulta falló dentro del init.sql
+                            print(f"Error en sentencia: {sentencia_limpia[:50]}... -> {sql_err}")
+                            raise sql_err
+            print("Sentencias SQL ejecutadas con éxito.")
+        else:
+            print(f"Advertencia: No se encontró el archivo SQL en {ruta_sql}")
 
-# Voz (micrófono): umbrales anti-ruido; ajustables por env si hace falta
-VOICE_SILENCE_SECONDS = float(os.getenv("VOICE_SILENCE_SECONDS", "1.2"))
-VOICE_RMS_MIN = float(os.getenv("VOICE_RMS_MIN", "450"))
-VOICE_RMS_CALIBRATION_S = float(os.getenv("VOICE_RMS_CALIBRATION_S", "0.35"))
-VOICE_RMS_MULTIPLIER = float(os.getenv("VOICE_RMS_MULTIPLIER", "2.4"))
-VOICE_RMS_OFFSET = float(os.getenv("VOICE_RMS_OFFSET", "120"))
+        # Reactivar la verificación de restricciones
+        cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+        print("Verificación de llaves foráneas reactivada.")
+
+        conexion.commit()
+        cursor.close()
+        conexion.close()
+        print("Base de datos inicializada correctamente.")
+
+    except mysql.connector.Error as err:
+        print(f"Error inicializando BD: {err}")
+        # Asegura que si algo falla estrepitosamente, el script lo notifique al contenedor
+        raise err
+
+if __name__ == "__main__":
+    inicializar_base_de_datos()
