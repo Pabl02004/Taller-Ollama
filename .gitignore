@@ -45,3 +45,4 @@ Thumbs.db
 
 # Modelos Vosk descargados localmente
 iespro_taller/models/
+iespro_taller/.venv/
