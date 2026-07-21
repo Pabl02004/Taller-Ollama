@@ -21,4 +21,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Ejecutar la aplicación
-CMD ["python", "iespro_taller/main.py"]
+CMD ["sh", "-c", "streamlit run iespro_taller/services/app_web.py --server.port=${PORT:-8080} --server.address=0.0.0.0"]
